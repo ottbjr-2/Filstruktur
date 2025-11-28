@@ -1,12 +1,1520 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="sv">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Filstruktur</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Interaktivt Monteringsstrukturverktyg v2.4</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- JSZip för att hantera ZIP-filer (Backup med bilder) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f4f7f9;
+            overscroll-behavior-y: none;
+        }
+        
+        /* --- TREE CSS --- */
+        .node-container { position: relative; padding-left: 1.25rem; }
+        @media (min-width: 768px) { .node-container { padding-left: 1.75rem; } }
+        
+        .node-line::before {
+            content: ''; position: absolute; top: 0; left: 0.5rem; width: 2px; height: 100%; background-color: #cbd5e1; z-index: 0;
+        }
+        @media (min-width: 768px) { .node-line::before { left: 0.875rem; } }
+
+        .node-line-horizontal::after {
+            content: ''; position: absolute; top: 1.25rem; left: 0.5rem; width: 0.75rem; height: 2px; background-color: #cbd5e1; z-index: 0;
+        }
+        @media (min-width: 768px) { .node-line-horizontal::after { left: 0.875rem; width: 0.875rem; } }
+
+        .node-line:last-child::before { height: 1.25rem; }
+        
+        .toggle-btn {
+            position: absolute; left: 0.5rem; top: 1.25rem; transform: translate(-50%, -50%);
+            width: 1.25rem; height: 1.25rem; background-color: white; border: 2px solid #cbd5e1;
+            border-radius: 50%; display: flex; align-items: center; justify-content: center;
+            font-size: 1rem; line-height: 1; color: #64748b; cursor: pointer; z-index: 10; transition: all 0.2s;
+        }
+        @media (min-width: 768px) { .toggle-btn { left: 0.875rem; } }
+        .toggle-btn:hover { border-color: #6366f1; color: #6366f1; background-color: #f5f7ff; }
+
+        .node-card {
+            cursor: grab; transition: all 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-radius: 0.5rem; user-select: none; -webkit-user-select: none;
+            position: relative; margin-left: 0.5rem;
+        }
+        .node-card:active { cursor: grabbing; }
+        .node-card.dragging { opacity: 0.5; border: 2px dashed #6366f1; }
+        .node-card.drag-over { background-color: #e0e7ff; border: 2px dashed #4338ca; transform: scale(1.02); z-index: 10; }
+        .node-card.drag-over.target-part { border-color: #ef4444; background-color: #fee2e2; }
+
+        .assembly-color { background-color: #2563eb; }
+        .part-color { background-color: #059669; }
+        
+        .custom-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scroll::-webkit-scrollbar-track { background: #f1f1f1; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
+        .hidden-input { display: none; }
+
+        /* --- ANIMATIONS --- */
+        .info-box-hidden { transform: translateY(100%); }
+        @media (min-width: 768px) { .info-box-hidden { transform: translateX(120%); } }
+        
+        .modal-backdrop { background-color: rgba(0, 0, 0, 0.5); backdrop-filter: blur(4px); }
+        
+        /* --- SETTINGS MENU --- */
+        .settings-menu {
+            transform-origin: top right;
+            transition: transform 0.2s ease-out, opacity 0.2s ease-out;
+        }
+        .settings-menu.hidden {
+            transform: scale(0.95);
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        /* Status Colors */
+        .status-not-started { background-color: #9ca3af; } 
+        .status-started { background-color: #3b82f6; }      
+        .status-struggling { background-color: #f97316; }   
+        .status-done { background-color: #22c55e; }        
+
+        /* Image Preview Styles */
+        .image-preview-container {
+            width: 100%;
+            height: 180px;
+            background-color: #f3f4f6;
+            border-radius: 0.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            border: 2px dashed #d1d5db;
+            position: relative;
+            margin-bottom: 1rem;
+            transition: border-color 0.2s;
+        }
+        .image-preview-container:hover {
+            border-color: #9ca3af;
+        }
+        .image-preview-container img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .image-preview-container.has-image {
+            border: none;
+        }
+        .image-overlay {
+            position: absolute; inset: 0; background: rgba(0,0,0,0.5);
+            display: flex; align-items: center; justify-content: center; gap: 10px;
+            opacity: 0; transition: opacity 0.2s;
+        }
+        .image-preview-container:hover .image-overlay { opacity: 1; }
+        
+    </style>
 </head>
-<body>
-    <h1>Filstruktur</h1>
-    <p>Hantering av Parts/Assemblies i ett filträd för CAD-team</p>
+<body class="p-2 md:p-8 min-h-screen flex flex-col pb-32 md:pb-8">
+
+    <!-- LOADING SPINNER (Fixed: CSS conflict removed, styles moved to Tailwind classes) -->
+    <div id="loading-overlay" class="hidden fixed inset-0 bg-white/90 z-[200] flex justify-center items-center flex-col">
+        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
+        <p class="text-gray-600 font-medium" id="loading-text">Bearbetar...</p>
+    </div>
+
+    <!-- HEADER (Z-20) -->
+    <header class="mb-2 p-4 bg-white rounded-xl shadow-lg relative z-20">
+        <div class="flex flex-col gap-4">
+            <div class="flex justify-between items-start">
+                <div>
+                    <h1 class="text-xl md:text-3xl font-bold text-gray-800 leading-tight">Monteringsstruktur</h1>
+                    <p class="text-xs md:text-sm text-gray-500 mt-1">Hantering av Sticksågens Parts/Assemblies.</p>
+                </div>
+
+                <div class="flex items-center gap-3">
+                    <button id="export-zip" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-lg shadow-md text-sm flex items-center gap-2 active:scale-95 transition-transform">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 16 16"><path d="M6.5 7.5a1 1 0 0 1 1-1h5a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-5a1 1 0 0 1-1-1v-5z"/><path d="M3 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/></svg>
+                        <span class="hidden sm:inline">Spara ZIP (Backup)</span>
+                        <span class="sm:hidden">ZIP</span>
+                    </button>
+
+                    <div class="relative">
+                        <button id="settings-btn" class="p-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-700 transition-colors">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16">
+                                <path d="M9.405 1.05c-.413-1.4-2.397-1.4-2.81 0l-.1.34a1.464 1.464 0 0 1-2.105.872l-.31-.17c-1.283-.698-2.686.705-1.987 1.987l.169.311c.446.82.023 1.841-.872 2.105l-.34.1c-1.4.413-1.4 2.397 0 2.81l.34.1a1.464 1.464 0 0 1 .872 2.105l-.17.31c-.698 1.283.705 2.686 1.987 1.987l.311-.169a1.464 1.464 0 0 1 2.105.872l.1.34c.413 1.4 2.397 1.4 2.81 0l.1-.34a1.464 1.464 0 0 1 2.105-.872l.31.17c1.283.698 2.686-.705 1.987-1.987l-.169-.311a1.464 1.464 0 0 1 .872-2.105l.34-.1c1.4-.413 1.4-2.397 0-2.81l-.34-.1a1.464 1.464 0 0 1-.872-2.105l.17-.31c.698-1.283-.705-2.686-1.987-1.987l-.311.169a1.464 1.464 0 0 1-2.105-.872l-.1-.34zM8 10.93a2.929 2.929 0 1 1 0-5.86 2.929 2.929 0 0 1 0 5.86z"/>
+                            </svg>
+                        </button>
+                        <div id="settings-menu" class="settings-menu hidden absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-xl border border-gray-100 z-50">
+                            <div class="py-1">
+                                <input type="file" id="import-file-input" class="hidden-input" accept=".csv,.zip">
+                                <button onclick="document.getElementById('import-file-input').click()" class="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="text-blue-500" viewBox="0 0 16 16"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/><path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/></svg>
+                                    Importera (CSV eller ZIP)
+                                </button>
+                                <button id="export-csv" class="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2 border-t border-gray-100">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="text-green-600" viewBox="0 0 16 16"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/><path d="M7.646 1.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 2.707V11.5a.5.5 0 0 1-1 0V2.707L5.354 4.854a.5.5 0 1 1-.708-.708l3-3z"/></svg>
+                                    Exportera CSV (Bara text)
+                                </button>
+                                <button id="export-excel" class="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2 border-t border-gray-100">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="text-green-600" viewBox="0 0 16 16"><path d="M14 14V4.5L9.5 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2zM9.5 3A1.5 1.5 0 0 0 11 4.5h2V14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h5.5v2z"/><path d="M3 12.5h2.5a.5.5 0 0 0 0-1H4a.5.5 0 0 0-.5.5v.5zm0-3h2.5a.5.5 0 0 0 0-1H4a.5.5 0 0 0-.5.5v.5zm0-3h2.5a.5.5 0 0 0 0-1H4a.5.5 0 0 0-.5.5v.5zm4 6h4.5a.5.5 0 0 0 0-1H8a.5.5 0 0 0-.5.5v.5zm0-3h4.5a.5.5 0 0 0 0-1H8a.5.5 0 0 0-.5.5v.5zm0-3h4.5a.5.5 0 0 0 0-1H8a.5.5 0 0 0-.5.5v.5z"/></svg>
+                                    Ladda ner som Excel
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="flex flex-col sm:flex-row gap-2 items-center bg-gray-50 p-2 rounded-lg border border-gray-100 w-full">
+                <label for="responsible-filter" class="font-medium text-gray-700 whitespace-nowrap text-sm">Filtrera Ansvarig:</label>
+                <select id="responsible-filter" class="p-2 border border-gray-300 rounded-lg shadow-sm focus:ring-blue-500 focus:border-blue-500 w-full">
+                    <option value="ALL">Visa alla</option>
+                </select>
+            </div>
+        </div>
+    </header>
+
+    <!-- STATUS DASHBOARD -->
+    <div id="status-dashboard" class="mb-4 md:mb-6 p-4 bg-white rounded-xl shadow-md">
+        <h3 class="text-sm font-bold text-gray-700 mb-2 flex justify-between">
+            <span>Statusöversikt: <span id="dashboard-filter-label" class="font-normal text-gray-500">Alla</span></span>
+            <span class="text-xs text-gray-400" id="dashboard-total">0 delar</span>
+        </h3>
+        
+        <!-- Progress Bars Grid -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <!-- Inte påbörjad -->
+            <div class="bg-gray-50 rounded-lg p-2 border border-gray-100">
+                <div class="flex justify-between text-xs mb-1">
+                    <span class="font-medium text-gray-600">Inte påbörjad</span>
+                    <span class="font-bold text-gray-800" id="count-not-started">0</span>
+                </div>
+                <div class="w-full bg-gray-200 rounded-full h-2">
+                    <div id="bar-not-started" class="status-not-started h-2 rounded-full transition-all duration-500" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <!-- Påbörjad -->
+            <div class="bg-blue-50 rounded-lg p-2 border border-blue-100">
+                <div class="flex justify-between text-xs mb-1">
+                    <span class="font-medium text-blue-700">Påbörjad</span>
+                    <span class="font-bold text-blue-800" id="count-started">0</span>
+                </div>
+                <div class="w-full bg-blue-100 rounded-full h-2">
+                    <div id="bar-started" class="status-started h-2 rounded-full transition-all duration-500" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <!-- Ger snart upp -->
+            <div class="bg-orange-50 rounded-lg p-2 border border-orange-100">
+                <div class="flex justify-between text-xs mb-1">
+                    <span class="font-medium text-orange-700">Ger snart upp</span>
+                    <span class="font-bold text-orange-800" id="count-struggling">0</span>
+                </div>
+                <div class="w-full bg-orange-100 rounded-full h-2">
+                    <div id="bar-struggling" class="status-struggling h-2 rounded-full transition-all duration-500" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <!-- Färdig -->
+            <div class="bg-green-50 rounded-lg p-2 border border-green-100">
+                <div class="flex justify-between text-xs mb-1">
+                    <span class="font-medium text-green-700">Färdig</span>
+                    <span class="font-bold text-green-800" id="count-done">0</span>
+                </div>
+                <div class="w-full bg-green-100 rounded-full h-2">
+                    <div id="bar-done" class="status-done h-2 rounded-full transition-all duration-500" style="width: 0%"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TREE CONTAINER (Z-0) -->
+    <div id="tree-container" class="bg-white p-4 md:p-6 rounded-xl shadow-lg min-h-[500px] overflow-auto custom-scroll relative z-0">
+        <div id="tree-view" class="min-w-max pb-20">
+            <!-- Trädstrukturen renderas här -->
+        </div>
+        <p id="no-data-message" class="text-center text-gray-500 mt-12 hidden">Ingen data att visa.</p>
+    </div>
+
+    <!-- INFO BOX (Z-30) -->
+    <div id="info-box" class="fixed z-30 bg-white shadow-[0_-4px_20px_rgba(0,0,0,0.15)] md:shadow-2xl border-t-4 border-blue-500 transition-transform duration-300 ease-out info-box-hidden bottom-0 left-0 right-0 w-full rounded-t-2xl max-h-[90vh] overflow-y-auto md:bottom-4 md:right-4 md:left-auto md:w-96 md:rounded-xl">
+        <div class="p-4 md:p-5">
+            <div class="w-12 h-1.5 bg-gray-300 rounded-full mx-auto mb-4 md:hidden"></div>
+            
+            <!-- IMAGE PREVIEW AREA -->
+            <div id="info-image-container" class="image-preview-container group">
+                <div id="no-image-placeholder" class="text-gray-400 flex flex-col items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="currentColor" viewBox="0 0 16 16"><path d="M6.002 5.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/><path d="M2.002 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2h-12zm12 1a1 1 0 0 1 1 1v6.5l-3.777-1.947a.5.5 0 0 0-.577.093l-3.71 3.71-2.66-1.772a.5.5 0 0 0-.63.062L1.002 12V3a1 1 0 0 1 1-1h12z"/></svg>
+                    <span class="text-xs mt-2">Ingen bild</span>
+                    <button onclick="triggerImageUpload()" class="mt-2 text-blue-600 text-xs hover:underline cursor-pointer">Lägg till bild</button>
+                </div>
+                <img id="info-image-display" src="" class="hidden" alt="Part Image">
+                
+                <!-- Overlay Buttons when image exists -->
+                <div id="image-actions" class="image-overlay hidden">
+                    <button onclick="triggerImageUpload()" class="bg-white text-gray-800 p-2 rounded-full shadow hover:bg-gray-100" title="Byt bild">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M10.5 8a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0z"/><path d="M0 8s3-5.5 8-5.5S16 8 16 8s-3 5.5-8 5.5S0 8 0 8zm8 3.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/></svg>
+                    </button>
+                    <button onclick="removeImageFromNode()" class="bg-white text-red-600 p-2 rounded-full shadow hover:bg-red-50" title="Ta bort bild">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/></svg>
+                    </button>
+                </div>
+            </div>
+            <input type="file" id="image-upload-input" class="hidden" accept="image/*">
+
+            <!-- Title & Close -->
+            <div class="flex justify-between items-start mb-1">
+                <h3 class="text-xl font-bold text-gray-800 break-words w-full pr-4" id="info-box-title"></h3>
+                <button onclick="hideInfoBox()" class="text-gray-400 hover:text-gray-600 p-1 -mr-2 -mt-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+            </div>
+
+            <p class="text-sm font-medium text-gray-500 mb-3 break-words" id="info-box-nickname"></p>
+            
+            <div class="flex items-center gap-2 mb-3">
+                <span class="text-xs text-gray-400" id="info-box-id"></span>
+                <span class="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded" id="info-box-simpleid"></span>
+                <span id="info-box-status-pill" class="text-xs font-semibold text-white px-2 py-1 rounded uppercase tracking-wide"></span>
+            </div>
+            
+            <div class="space-y-2 text-sm mb-4">
+                <p class="flex justify-between border-b border-gray-100 pb-1"><span>Filtyp:</span> <span id="info-filetype" class="font-semibold"></span></p>
+                <p class="flex justify-between border-b border-gray-100 pb-1"><span>Antal:</span> <span id="info-count"></span></p>
+                <p class="flex justify-between border-b border-gray-100 pb-1"><span>Ansvarig:</span> <span id="info-responsible" class="font-medium text-blue-600"></span></p>
+                <div class="pt-1">
+                    <span class="block text-gray-500 text-xs mb-1">Filnamn:</span>
+                    <code id="info-filename" class="block bg-gray-100 p-2 rounded text-xs break-all"></code>
+                </div>
+            </div>
+            <div id="info-notes-container" class="mb-4 bg-yellow-50 p-3 rounded-lg border border-yellow-100 hidden">
+                <strong class="text-xs text-yellow-800 uppercase tracking-wide block mb-1">Anteckningar</strong>
+                <p id="info-notes" class="text-sm text-gray-700 whitespace-pre-wrap break-words"></p>
+            </div>
+            <div class="grid grid-cols-1 gap-3 pt-2 border-t border-gray-100">
+                <button id="add-part-btn" class="bg-green-600 active:bg-green-700 text-white font-semibold py-3 rounded-lg transition duration-150 text-sm flex justify-center items-center">+ Lägg till</button>
+                <div class="grid grid-cols-2 gap-3">
+                    <button id="edit-btn" class="bg-blue-600 active:bg-blue-700 text-white font-semibold py-3 rounded-lg transition duration-150 text-sm">Redigera</button>
+                    <button id="delete-btn" class="bg-red-100 text-red-600 active:bg-red-200 font-semibold py-3 rounded-lg transition duration-150 text-sm border border-red-200">Ta bort</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= MODALER ================= -->
+
+    <!-- ERROR ALERT MODAL (Z-100) -->
+    <div id="custom-alert-modal" class="fixed inset-0 z-[100] hidden flex items-center justify-center p-4 modal-backdrop">
+        <div class="bg-white p-6 rounded-xl shadow-2xl w-full max-w-sm transform transition-all scale-100 border-l-4 border-red-500">
+            <h3 class="text-lg font-bold mb-2 text-gray-800" id="custom-alert-title">Ogiltig åtgärd</h3>
+            <p class="text-gray-600 text-sm mb-6" id="custom-alert-message"></p>
+            <div class="flex justify-end">
+                <button onclick="closeCustomAlert()" class="px-4 py-2 bg-gray-800 text-white font-semibold rounded-lg hover:bg-gray-900">OK, jag förstår</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- DELETE MODAL (Z-50) -->
+    <div id="delete-modal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 modal-backdrop">
+        <div class="bg-white p-6 rounded-xl shadow-2xl w-full max-w-md relative">
+            <h3 class="text-xl font-bold mb-2 text-red-600">Ta bort del?</h3>
+            <p class="text-gray-700 mb-4">Är du säker på att du vill ta bort <span id="delete-node-name" class="font-semibold text-gray-900"></span>?</p>
+            <p class="text-sm text-gray-500 mb-6 bg-red-50 p-3 rounded-lg border border-red-100">⚠️ Detta tar bort <strong>alla underordnade delar</strong>. Åtgärden går ej att ångra.</p>
+            <input type="hidden" id="delete-node-id">
+            <div class="flex flex-col-reverse sm:flex-row justify-end gap-3">
+                <button id="cancel-delete-btn" class="w-full sm:w-auto px-4 py-3 sm:py-2 bg-gray-100 text-gray-700 font-semibold rounded-lg hover:bg-gray-200">Avbryt</button>
+                <button id="confirm-delete-btn" class="w-full sm:w-auto px-4 py-3 sm:py-2 bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 shadow-md">Ja, ta bort</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- EDIT MODAL (Z-50) -->
+    <div id="edit-modal" class="fixed inset-0 z-50 hidden flex items-end sm:items-center justify-center p-0 sm:p-4 modal-backdrop">
+        <div class="bg-white w-full sm:max-w-lg rounded-t-2xl sm:rounded-xl shadow-2xl max-h-[90vh] overflow-y-auto relative">
+            <div class="p-6">
+                <div class="flex justify-between items-start mb-4">
+                    <h2 class="text-2xl font-bold text-gray-800" id="modal-title">Redigera</h2>
+                    <button onclick="closeEditModal()" class="text-gray-400 hover:text-gray-600 p-1"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg></button>
+                </div>
+                <form id="edit-form" class="space-y-4">
+                    <input type="hidden" id="modal-id">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label for="modal-actualName" class="block text-sm font-bold text-gray-800 mb-1">Faktiskt Namn</label>
+                            <input type="text" id="modal-actualName" required class="block w-full border border-gray-300 rounded-lg shadow-sm p-3 sm:p-2 focus:ring-blue-500 focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label for="modal-nickname" class="block text-sm font-medium text-gray-700 mb-1">Nickname</label>
+                            <input type="text" id="modal-nickname" required class="block w-full border border-gray-300 rounded-lg shadow-sm p-3 sm:p-2 focus:ring-blue-500 focus:border-blue-500">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                        <select id="modal-status" class="block w-full border border-gray-300 rounded-lg shadow-sm p-3 sm:p-2 focus:ring-blue-500 focus:border-blue-500 bg-white">
+                            <option value="not_started">Inte påbörjad</option>
+                            <option value="started">Påbörjad</option>
+                            <option value="struggling">Påbörjad, men ger snart upp</option>
+                            <option value="done">Färdig</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Ansvarig</label>
+                        <div class="flex gap-2">
+                            <select id="modal-responsible" class="block w-full border border-gray-300 rounded-lg shadow-sm p-3 sm:p-2 focus:ring-blue-500 focus:border-blue-500 bg-white"></select>
+                            <button type="button" onclick="openResponsibleManager()" class="bg-gray-100 text-gray-700 px-3 rounded-lg text-sm whitespace-nowrap border border-gray-200 active:bg-gray-200">Hantera</button>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label for="modal-filetype" class="block text-sm font-medium text-gray-700 mb-1">Filtyp</label>
+                            <select id="modal-filetype" required class="block w-full border border-gray-300 rounded-lg shadow-sm p-3 sm:p-2 focus:ring-blue-500 focus:border-blue-500 bg-white">
+                                <option value="Assembly">Assembly</option>
+                                <option value="Part">Part</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="modal-count" class="block text-sm font-medium text-gray-700 mb-1">Antal</label>
+                            <input type="number" id="modal-count" required min="1" class="block w-full border border-gray-300 rounded-lg shadow-sm p-3 sm:p-2 focus:ring-blue-500 focus:border-blue-500">
+                        </div>
+                    </div>
+                    <div>
+                        <label for="modal-notes" class="block text-sm font-medium text-gray-700 mb-1">Anteckningar</label>
+                        <textarea id="modal-notes" rows="3" class="block w-full border border-gray-300 rounded-lg shadow-sm p-3 sm:p-2 focus:ring-blue-500 focus:border-blue-500 resize-none overflow-hidden" placeholder="..."></textarea>
+                    </div>
+                    <div class="bg-gray-50 p-2 rounded text-xs text-gray-500 flex justify-between items-center">
+                        <span><strong>ID:</strong> <span id="modal-display-simpleid"></span></span>
+                        <span class="italic text-gray-400">Autogenererat</span>
+                    </div>
+                    <div class="flex justify-end space-x-3 pt-4 border-t border-gray-100">
+                        <button type="button" id="close-modal-btn" class="hidden sm:block px-4 py-2 bg-gray-100 text-gray-700 font-semibold rounded-lg hover:bg-gray-200">Avbryt</button>
+                        <button type="submit" class="w-full sm:w-auto px-6 py-3 sm:py-2 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 shadow-md">Spara</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- ADD MODAL (Z-50) -->
+    <div id="add-modal" class="fixed inset-0 z-50 hidden flex items-end sm:items-center justify-center p-0 sm:p-4 modal-backdrop">
+        <div class="bg-white w-full sm:max-w-lg rounded-t-2xl sm:rounded-xl shadow-2xl max-h-[90vh] overflow-y-auto relative">
+            <div class="p-6">
+                <div class="flex justify-between items-start mb-4">
+                    <h2 class="text-xl sm:text-2xl font-bold text-gray-800">Lägg till under <span id="add-parent-name" class="text-blue-600 truncate block sm:inline"></span></h2>
+                    <button onclick="closeAddModal()" class="text-gray-400 hover:text-gray-600 p-1"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg></button>
+                </div>
+                <form id="add-form" class="space-y-4">
+                    <input type="hidden" id="add-parent-id">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label for="add-actualName" class="block text-sm font-bold text-gray-800 mb-1">Faktiskt Namn</label>
+                            <input type="text" id="add-actualName" required class="block w-full border border-gray-300 rounded-lg shadow-sm p-3 sm:p-2 focus:ring-blue-500 focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label for="add-nickname" class="block text-sm font-medium text-gray-700 mb-1">Nickname</label>
+                            <input type="text" id="add-nickname" required class="block w-full border border-gray-300 rounded-lg shadow-sm p-3 sm:p-2 focus:ring-blue-500 focus:border-blue-500">
+                        </div>
+                    </div>
+                    
+                    <!-- Status Selector -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                        <select id="add-status" class="block w-full border border-gray-300 rounded-lg shadow-sm p-3 sm:p-2 focus:ring-blue-500 focus:border-blue-500 bg-white">
+                            <option value="not_started" selected>Inte påbörjad</option>
+                            <option value="started">Påbörjad</option>
+                            <option value="struggling">Påbörjad, men ger snart upp</option>
+                            <option value="done">Färdig</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Ansvarig</label>
+                        <div class="flex gap-2">
+                            <select id="add-responsible" class="block w-full border border-gray-300 rounded-lg shadow-sm p-3 sm:p-2 focus:ring-blue-500 focus:border-blue-500 bg-white"></select>
+                            <button type="button" onclick="openResponsibleManager()" class="bg-gray-100 text-gray-700 px-3 rounded-lg text-sm whitespace-nowrap border border-gray-200 active:bg-gray-200">Hantera</button>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label for="add-filetype" class="block text-sm font-medium text-gray-700 mb-1">Filtyp</label>
+                            <select id="add-filetype" required class="block w-full border border-gray-300 rounded-lg shadow-sm p-3 sm:p-2 focus:ring-blue-500 focus:border-blue-500 bg-white">
+                                <option value="Assembly">Assembly</option>
+                                <option value="Part">Part</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="add-count" class="block text-sm font-medium text-gray-700 mb-1">Antal</label>
+                            <input type="number" id="add-count" required min="1" class="block w-full border border-gray-300 rounded-lg shadow-sm p-3 sm:p-2 focus:ring-blue-500 focus:border-blue-500">
+                        </div>
+                    </div>
+                    <div>
+                        <label for="add-notes" class="block text-sm font-medium text-gray-700 mb-1">Anteckningar</label>
+                        <textarea id="add-notes" rows="3" class="block w-full border border-gray-300 rounded-lg shadow-sm p-3 sm:p-2 focus:ring-blue-500 focus:border-blue-500 resize-none overflow-hidden" placeholder="..."></textarea>
+                    </div>
+                    <div class="bg-indigo-50 p-2 rounded text-xs text-indigo-700">* Ett unikt ID kommer genereras automatiskt när du sparar.</div>
+                    <div class="flex justify-end space-x-3 pt-4 border-t border-gray-100">
+                        <button type="button" id="close-add-modal-btn" class="hidden sm:block px-4 py-2 bg-gray-100 text-gray-700 font-semibold rounded-lg hover:bg-gray-200">Avbryt</button>
+                        <button type="submit" class="w-full sm:w-auto px-6 py-3 sm:py-2 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 shadow-md">Lägg till</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- MANAGER MODAL (Z-50) -->
+    <div id="resp-manager-modal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4 modal-backdrop">
+        <div class="bg-white p-6 rounded-xl shadow-2xl w-full max-w-md relative">
+            <h3 class="text-xl font-bold mb-4 text-gray-800">Hantera Ansvariga</h3>
+            <div class="flex gap-2 mb-4">
+                <input type="text" id="new-resp-name" placeholder="Nytt namn..." class="flex-1 border border-gray-300 rounded-lg p-3 sm:p-2 focus:ring-blue-500 focus:border-blue-500">
+                <button onclick="addResponsibleName()" class="bg-green-600 hover:bg-green-700 text-white px-4 rounded-lg font-medium">Lägg till</button>
+            </div>
+            <ul id="resp-list" class="max-h-60 overflow-y-auto custom-scroll border border-gray-200 rounded-lg divide-y divide-gray-100 mb-4"></ul>
+            <div class="flex justify-end">
+                <button onclick="closeResponsibleManager()" class="w-full sm:w-auto px-4 py-3 sm:py-2 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700">Klar</button>
+            </div>
+        </div>
+    </div>
+
+
+    <script>
+        const DATA_KEY = 'assemblyStructureData_v28'; 
+        const RESP_KEY = 'responsibleNamesList_v28';
+        const defaultResponsibles = ['?', 'Alva', 'Otto', 'Izabelle', 'Sebbe', 'Ossian'];
+        let responsibleNames = [];
+        let loadingTimeout = null;
+        
+        // KOMPLETT DATA MED ALLA GRENAR OCH STATUS
+        const initialData = [
+            // Root
+            { id: '1', parentId: null, nickname: 'Sticksåg', actualName: 'STICKSÅG', filetype: 'Assembly', count: 1, responsible: '?', simpleId: '1001', notes: '', status: 'not_started', expanded: true, children: ['2', '3', '4', '5', '19', '20', '30'] },
+            
+            // Drivsystem
+            { id: '2', parentId: '1', nickname: 'Drivsystem', actualName: 'Drivsystem', filetype: 'Assembly', count: 1, responsible: '?', simpleId: '1010', notes: '', status: 'not_started', expanded: true, children: ['6', '7'] },
+                // Motor
+                { id: '6', parentId: '2', nickname: 'Motor', actualName: 'Motor', filetype: 'Assembly', count: 1, responsible: '?', simpleId: '1011', notes: '', status: 'not_started', expanded: true, children: ['8', '9', '10', '11', '21'] },
+                    { id: '8', parentId: '6', nickname: 'Fläktkomponent', actualName: 'Fläktkomponent', filetype: 'Part', count: 1, responsible: 'Izabelle', simpleId: '1015', notes: '', status: 'not_started', children: [] },
+                    { id: '21', parentId: '6', nickname: 'Motor-Guldlock', actualName: 'Guldlock', filetype: 'Part', count: 1, responsible: 'Otto', simpleId: '1021', notes: '', status: 'not_started', children: [] }, 
+                    { id: '9', parentId: '6', nickname: 'Motorklump', actualName: 'Klump', filetype: 'Part', count: 1, responsible: 'Otto', simpleId: '1013', notes: '', status: 'not_started', children: [] },
+                    { id: '10', parentId: '6', nickname: 'Motor-kopplingslock', actualName: 'Kopplingslock', filetype: 'Part', count: 1, responsible: 'Otto', simpleId: '1014', notes: '', status: 'not_started', children: [] },
+                    { id: '11', parentId: '6', nickname: 'Motorskruv', actualName: 'Motor', filetype: 'Part', count: 2, responsible: 'Alva', simpleId: '1012', notes: '', status: 'not_started', children: [] }, 
+                
+                // Växellåda
+                { id: '7', parentId: '2', nickname: 'Växellåda', actualName: 'Växellåda', filetype: 'Assembly', count: 1, responsible: '?', simpleId: '1016', notes: '', status: 'not_started', expanded: true, children: ['12'] },
+                    { id: '12', parentId: '7', nickname: 'Skruvar till växellåda', actualName: 'Skruvar till växellåda', filetype: 'Part', count: 2, responsible: 'Izabelle', simpleId: '1017', notes: '', status: 'not_started', children: [] },
+
+            // Fot
+            { id: '3', parentId: '1', nickname: 'Fot', actualName: 'Fot', filetype: 'Assembly', count: 1, responsible: 'Alva', simpleId: '1002', notes: '', status: 'not_started', expanded: true, children: ['13', '14', '15'] },
+                { id: '13', parentId: '3', nickname: 'Bas till fot', actualName: 'Bas till fot', filetype: 'Part', count: 1, responsible: 'Alva', simpleId: '1003', notes: '', status: 'not_started', children: [] },
+                { id: '14', parentId: '3', nickname: 'Bricka till fot', actualName: 'Bricka till fot', filetype: 'Part', count: 1, responsible: 'Alva', simpleId: '1004', notes: '', status: 'not_started', children: [] },
+                { id: '15', parentId: '3', nickname: 'Skruv till fot', actualName: 'Skruv till fot', filetype: 'Part', count: 2, responsible: 'Alva', simpleId: '1005', notes: '', status: 'not_started', children: [] },
+
+            // Sågbladsassembly
+            { id: '4', parentId: '1', nickname: 'Sågbladsassembly', actualName: 'Sågbladsassembly', filetype: 'Assembly', count: 1, responsible: '?', simpleId: '1006', notes: '', status: 'not_started', expanded: true, children: ['16', '17', '18'] },
+                { id: '16', parentId: '4', nickname: 'Fäste till sågblad', actualName: 'Fäste till sågblad', filetype: 'Part', count: 1, responsible: 'Alva', simpleId: '1007', notes: '', status: 'not_started', children: [] },
+                { id: '17', parentId: '4', nickname: 'Sågblad', actualName: 'Blad', filetype: 'Part', count: 1, responsible: 'Izabelle', simpleId: '1008', notes: '', status: 'not_started', children: [] },
+                { id: '18', parentId: '4', nickname: 'Skruv till sågblad', actualName: 'Skruv', filetype: 'Part', count: 1, responsible: 'Izabelle', simpleId: '1009', notes: '', status: 'not_started', children: [] },
+
+            // Kablage
+            { id: '5', parentId: '1', nickname: 'Kablage', actualName: 'Kablage', filetype: 'Assembly', count: 1, responsible: 'Otto', simpleId: '1018', notes: '', status: 'not_started', expanded: true, children: ['22', '23', '26', '28'] },
+                { id: '22', parentId: '5', nickname: 'Kabel', actualName: 'Kabel', filetype: 'Part', count: 1, responsible: 'Otto', simpleId: '1022', notes: '', status: 'not_started', children: [] },
+                { id: '23', parentId: '5', nickname: 'Kontakt', actualName: 'Kontakt', filetype: 'Assembly', count: 1, responsible: 'Otto', simpleId: '1023', notes: '', status: 'not_started', expanded: true, children: ['24', '25'] },
+                    { id: '24', parentId: '23', nickname: 'Plastklump', actualName: 'Plastklump', filetype: 'Part', count: 1, responsible: 'Otto', simpleId: '1024', notes: '', status: 'not_started', children: [] },
+                    { id: '25', parentId: '23', nickname: 'Metallpinne', actualName: 'Metallpinne', filetype: 'Part', count: 2, responsible: 'Otto', simpleId: '1025', notes: '', status: 'not_started', children: [] },
+                { id: '26', parentId: '5', nickname: 'Plastplupp', actualName: 'Plastplupp', filetype: 'Part', count: 1, responsible: 'Otto', simpleId: '1026', notes: '', status: 'not_started', children: [] },
+                { id: '28', parentId: '5', nickname: 'Triggerklump', actualName: 'Triggerklump', filetype: 'Assembly', count: 1, responsible: 'Otto', simpleId: '1028', notes: '', status: 'not_started', expanded: true, children: ['27', '29'] },
+                    { id: '27', parentId: '28', nickname: 'Hölje', actualName: 'Hölje', filetype: 'Part', count: 1, responsible: 'Otto', simpleId: '1027', notes: '', status: 'not_started', children: [] },
+                    { id: '29', parentId: '28', nickname: 'Knapp', actualName: 'Knapp', filetype: 'Part', count: 1, responsible: 'Otto', simpleId: '1029', notes: '', status: 'not_started', children: [] },
+
+            // Plastkropp (NY GREN)
+            { id: '30', parentId: '1', nickname: 'Plastkropp', actualName: 'Plastkropp', filetype: 'Assembly', count: 1, responsible: 'Ossian', simpleId: '1030', notes: 'Plastkroppen+ fästa för dammsugare + rektangulära muttrar', status: 'not_started', expanded: true, children: ['31', '32', '33', '34'] },
+                { id: '33', parentId: '30', nickname: 'Dammsugare koppling', actualName: 'Dammsugare koppling', filetype: 'Part', count: 1, responsible: 'Ossian', simpleId: '1033', notes: '', status: 'started', children: [] }, 
+                { id: '31', parentId: '30', nickname: 'Kropp logga sida', actualName: 'Kropp logga sida', filetype: 'Part', count: 1, responsible: 'Ossian', simpleId: '1031', notes: '', status: 'not_started', children: [] },
+                { id: '32', parentId: '30', nickname: 'Kropp text sida', actualName: 'Kropp text sida', filetype: 'Part', count: 1, responsible: 'Ossian', simpleId: '1032', notes: '', status: 'not_started', children: [] },
+                { id: '34', parentId: '30', nickname: 'Rektangulär mutter', actualName: 'Rektangulär mutter', filetype: 'Part', count: 2, responsible: 'Ossian', simpleId: '1034', notes: '', status: 'done', children: [] },
+
+            // Övrigt
+            { id: '19', parentId: '1', nickname: 'Utsida skruvar', actualName: 'Utsida skruvar', filetype: 'Part', count: 5, responsible: 'Izabelle', simpleId: '1019', notes: '', status: 'not_started', children: [] },
+            { id: '20', parentId: '1', nickname: 'Visir', actualName: 'Visir', filetype: 'Part', count: 1, responsible: 'Izabelle', simpleId: '1020', notes: '', status: 'not_started', children: [] },
+        ];
+        
+        let data = [];
+        let selectedNodeId = null;
+
+        function generateNextId() {
+            const maxId = data.reduce((max, node) => {
+                const num = parseInt(node.simpleId);
+                return !isNaN(num) && num > max ? num : max;
+            }, 1000);
+            return String(maxId + 1);
+        }
+
+        function loadData() {
+            try {
+                const storedResp = localStorage.getItem(RESP_KEY);
+                responsibleNames = storedResp ? JSON.parse(storedResp) : [...defaultResponsibles];
+            } catch(e) { responsibleNames = [...defaultResponsibles]; }
+
+            try {
+                const storedData = localStorage.getItem(DATA_KEY);
+                data = storedData ? JSON.parse(storedData) : JSON.parse(JSON.stringify(initialData));
+            } catch (e) { data = JSON.parse(JSON.stringify(initialData)); }
+            
+            let needsSave = false;
+            const existingIds = new Set(data.map(n => parseInt(n.simpleId)).filter(n => !isNaN(n)));
+            let nextIdCounter = 1001;
+            if (existingIds.size > 0) nextIdCounter = Math.max(...existingIds) + 1;
+
+            data.forEach(node => {
+                if (!node.actualName) { node.actualName = node.nickname; needsSave = true; }
+                if (!node.simpleId) { node.simpleId = String(nextIdCounter++); needsSave = true; }
+                if (node.notes === undefined) { node.notes = ''; needsSave = true; }
+                if (node.expanded === undefined) { node.expanded = true; needsSave = true; }
+                if (!node.status) { node.status = 'not_started'; needsSave = true; }
+                // Ensure image prop exists
+                if (node.image === undefined) { node.image = null; } 
+            });
+
+            regenerateFilenames(); 
+            saveData();
+            updateDashboard();
+        }
+
+        function saveData() {
+            try {
+                localStorage.setItem(DATA_KEY, JSON.stringify(data));
+                localStorage.setItem(RESP_KEY, JSON.stringify(responsibleNames));
+            } catch (e) { 
+                console.error("Kunde inte spara data.", e);
+                if(e.name === 'QuotaExceededError') {
+                    showCustomAlert("Minnet fullt", "Bilder tar för stor plats. Försök ta bort några bilder eller spara ner en ZIP-fil som backup och rensa sedan.");
+                }
+            }
+        }
+
+        function getNode(id) { return data.find(node => node.id === id); }
+
+        function getPathSegments(id) {
+            let node = getNode(id);
+            const path = [];
+            while (node && node.parentId !== null) {
+                const parent = getNode(node.parentId);
+                if (parent) {
+                    const segment = parent.actualName.trim().toUpperCase().replace(/\s+/g, '-').replace(/[^A-Z0-9_\-ÅÄÖ]/g, ''); 
+                    path.unshift(segment);
+                    node = parent;
+                } else { break; }
+            }
+            return path;
+        }
+
+        function getBaseFilename(node) {
+            const parentPath = getPathSegments(node.id);
+            const selfSegment = node.actualName.trim().toUpperCase().replace(/\s+/g, '-').replace(/[^A-Z0-9_\-ÅÄÖ]/g, '');
+            if (node.parentId === null) { 
+                return selfSegment;
+            } else {
+                return [...parentPath, selfSegment].join('_');
+            }
+        }
+
+        function regenerateFilenames() {
+            const baseNameCounts = new Map();
+            const nodeBaseNames = new Map();
+            data.forEach(node => {
+                const baseName = getBaseFilename(node);
+                nodeBaseNames.set(node.id, baseName);
+                if (baseNameCounts.has(baseName)) { baseNameCounts.set(baseName, baseNameCounts.get(baseName) + 1); } 
+                else { baseNameCounts.set(baseName, 1); }
+            });
+            data.forEach(node => {
+                const baseName = nodeBaseNames.get(node.id);
+                const count = baseNameCounts.get(baseName);
+                if (count > 1) { node.filename = `${baseName}_${node.simpleId}`; } 
+                else { node.filename = baseName; }
+            });
+        }
+
+        function autoResizeTextarea(element) {
+            element.style.height = 'auto';
+            element.style.height = element.scrollHeight + 'px';
+        }
+
+        function setInfoBoxVisibility(visible) {
+            const infoBox = document.getElementById('info-box');
+            if (visible) { infoBox.classList.remove('info-box-hidden'); } 
+            else { infoBox.classList.add('info-box-hidden'); selectedNodeId = null; }
+        }
+
+        function hideInfoBox() {
+            const infoBox = document.getElementById('info-box');
+            infoBox.classList.add('info-box-hidden');
+        }
+        
+        function showInfoBoxForNode(nodeId) {
+            updateInfoBox(nodeId);
+            selectedNodeId = nodeId;
+        }
+
+        function toggleExpand(nodeId) {
+            const node = getNode(nodeId);
+            if (node) {
+                node.expanded = !node.expanded;
+                saveData();
+                renderTree(document.getElementById('responsible-filter').value);
+            }
+        }
+
+        function showCustomAlert(title, message) {
+            document.getElementById('custom-alert-title').textContent = title;
+            document.getElementById('custom-alert-message').innerHTML = message;
+            document.getElementById('custom-alert-modal').classList.remove('hidden');
+        }
+
+        function closeCustomAlert() {
+            document.getElementById('custom-alert-modal').classList.add('hidden');
+        }
+
+        function toggleLoading(show, text = "Bearbetar...") {
+            const overlay = document.getElementById('loading-overlay');
+            const overlayText = document.getElementById('loading-text');
+            
+            // Clear any existing timeout safety net
+            if (loadingTimeout) {
+                clearTimeout(loadingTimeout);
+                loadingTimeout = null;
+            }
+
+            if (show) {
+                overlayText.textContent = text;
+                overlay.classList.remove('hidden');
+                
+                // SAFETY NET: If loading stuck for 10s, auto hide.
+                loadingTimeout = setTimeout(() => {
+                    if(!overlay.classList.contains('hidden')) {
+                        overlay.classList.add('hidden');
+                        showCustomAlert("Tidsgräns", "Åtgärden tog för lång tid och avbröts. Försök igen med en mindre fil.");
+                    }
+                }, 10000); 
+            } else {
+                overlay.classList.add('hidden');
+            }
+        }
+
+        // --- IMAGE HANDLING ---
+        
+        function triggerImageUpload() {
+            document.getElementById('image-upload-input').click();
+        }
+
+        document.getElementById('image-upload-input').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file || !selectedNodeId) return;
+
+            toggleLoading(true, "Komprimerar och sparar bild...");
+
+            const reader = new FileReader();
+            
+            reader.onload = function(event) {
+                const img = new Image();
+                
+                img.onload = function() {
+                    try {
+                        const canvas = document.createElement('canvas');
+                        const MAX_WIDTH = 800; // Minska maxbredden för att spara plats
+                        let width = img.width;
+                        let height = img.height;
+
+                        if (width > MAX_WIDTH) {
+                            height *= MAX_WIDTH / width;
+                            width = MAX_WIDTH;
+                        }
+
+                        canvas.width = width;
+                        canvas.height = height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, width, height);
+                        
+                        // Komprimera till JPEG med 0.7 kvalitet
+                        const dataUrl = canvas.toDataURL('image/jpeg', 0.7); 
+                        
+                        const node = getNode(selectedNodeId);
+                        if(node) {
+                            node.image = dataUrl;
+                            saveData();
+                            updateInfoBox(selectedNodeId);
+                            // Uppdatera även trädet för att visa bild-ikonen
+                            renderTree(document.getElementById('responsible-filter').value);
+                        }
+                    } catch (err) {
+                        showCustomAlert("Fel", "Kunde inte bearbeta bilden. " + err.message);
+                    } finally {
+                        toggleLoading(false);
+                    }
+                }
+
+                img.onerror = function() {
+                    toggleLoading(false);
+                    showCustomAlert("Fel", "Kunde inte läsa in bilden. Filen kan vara skadad.");
+                }
+
+                img.src = event.target.result;
+            }
+
+            reader.onerror = function() {
+                toggleLoading(false);
+                showCustomAlert("Fel", "Kunde inte läsa filen.");
+            }
+
+            try {
+                reader.readAsDataURL(file);
+            } catch(e) {
+                toggleLoading(false);
+                showCustomAlert("Fel", "Kunde inte starta inläsning: " + e.message);
+            }
+            e.target.value = ''; // Reset input
+        });
+
+        function removeImageFromNode() {
+            if(!selectedNodeId) return;
+            const node = getNode(selectedNodeId);
+            if(node) {
+                node.image = null;
+                saveData();
+                updateInfoBox(selectedNodeId);
+                renderTree(document.getElementById('responsible-filter').value);
+            }
+        }
+
+        // Global click listener for closing info box
+        document.addEventListener('click', function(event) {
+            const infoBox = document.getElementById('info-box');
+            const isClickInsideInfoBox = infoBox.contains(event.target);
+            const isNodeCard = event.target.closest('.node-card');
+            const isToggleBtn = event.target.closest('.toggle-btn');
+            const isModal = event.target.closest('.modal-backdrop'); 
+
+            if (!infoBox.classList.contains('info-box-hidden') && !isClickInsideInfoBox && !isNodeCard && !isToggleBtn && !isModal) {
+                hideInfoBox();
+                selectedNodeId = null;
+            }
+        });
+
+        // Add click listeners to modal backdrops
+        document.querySelectorAll('.modal-backdrop').forEach(modal => {
+            modal.addEventListener('click', (e) => {
+                if(e.target === e.currentTarget) {
+                    if (modal.id === 'edit-modal') closeEditModal();
+                    if (modal.id === 'add-modal') closeAddModal();
+                    if (modal.id === 'resp-manager-modal') closeResponsibleManager();
+                    if (modal.id === 'delete-modal') closeDeleteModal();
+                    if (modal.id === 'custom-alert-modal') closeCustomAlert();
+                }
+            });
+        });
+
+        // Settings Menu Toggle
+        const settingsBtn = document.getElementById('settings-btn');
+        const settingsMenu = document.getElementById('settings-menu');
+        settingsBtn.addEventListener('click', (e) => { e.stopPropagation(); settingsMenu.classList.toggle('hidden'); });
+        document.addEventListener('click', (e) => { if (!settingsMenu.contains(e.target) && !settingsBtn.contains(e.target)) { settingsMenu.classList.add('hidden'); } });
+
+        // --- DASHBOARD LOGIC ---
+        function updateDashboard() {
+            const filterVal = document.getElementById('responsible-filter').value;
+            
+            // Filter logic for stats: Specific person OR All
+            const activeNodes = data.filter(n => filterVal === 'ALL' || n.responsible === filterVal);
+            const total = activeNodes.length;
+
+            const counts = {
+                not_started: 0,
+                started: 0,
+                struggling: 0,
+                done: 0
+            };
+
+            activeNodes.forEach(n => {
+                if (counts[n.status] !== undefined) {
+                    counts[n.status]++;
+                } else {
+                    counts.not_started++; // Fallback
+                }
+            });
+
+            // Update Label
+            document.getElementById('dashboard-filter-label').textContent = filterVal === 'ALL' ? 'Alla' : filterVal;
+            document.getElementById('dashboard-total').textContent = `${total} delar`;
+
+            // Helper to set bar
+            const setBar = (type) => {
+                const count = counts[type];
+                const percent = total > 0 ? (count / total) * 100 : 0;
+                document.getElementById(`count-${type.replace('_','-')}`).textContent = count;
+                document.getElementById(`bar-${type.replace('_','-')}`).style.width = `${percent}%`;
+            };
+
+            setBar('not_started');
+            setBar('started');
+            setBar('struggling');
+            setBar('done');
+        }
+
+        function getStatusColorClass(status) {
+            switch(status) {
+                case 'started': return 'status-started';
+                case 'struggling': return 'status-struggling';
+                case 'done': return 'status-done';
+                default: return 'status-not-started';
+            }
+        }
+
+        function getStatusLabel(status) {
+            switch(status) {
+                case 'started': return 'Påbörjad';
+                case 'struggling': return 'Ger upp';
+                case 'done': return 'Färdig';
+                default: return 'Ej startad';
+            }
+        }
+
+        // --- UI Rendering ---
+        function renderTree(filterResponsible = 'ALL') {
+            updateDashboard(); // Update stats whenever tree renders
+
+            const treeContainer = document.getElementById('tree-view');
+            const noDataMessage = document.getElementById('no-data-message');
+            treeContainer.innerHTML = '';
+            
+            if (data.length === 0) { noDataMessage.classList.remove('hidden'); return; }
+            noDataMessage.classList.add('hidden');
+
+            const rootNode = data.find(node => node.parentId === null);
+            if (!rootNode) return;
+
+            const isNodeVisible = (nodeId, filterVal) => {
+                const node = getNode(nodeId);
+                if (!node) return false;
+                if (filterVal === 'ALL') return true; 
+                if (node.responsible === filterVal) return true;
+                if (node.filetype === 'Assembly') {
+                    const children = data.filter(n => n.parentId === nodeId);
+                    return children.some(child => isNodeVisible(child.id, filterVal));
+                }
+                return false;
+            };
+
+            function renderChildren(parentId) {
+                const children = data.filter(n => n.parentId === parentId);
+                if (children.length === 0) return '';
+
+                let html = '<ul class="mt-2 space-y-2">';
+                const currentFilter = document.getElementById('responsible-filter').value;
+
+                children.forEach((node, index) => {
+                    const isVisible = isNodeVisible(node.id, currentFilter);
+                    if (isVisible) {
+                        const isAssembly = node.filetype === 'Assembly';
+                        const colorClass = isAssembly ? 'assembly-color' : 'part-color';
+                        const hasChildren = data.filter(n => n.parentId === node.id).length > 0;
+                        
+                        let toggleButton = '';
+                        if (hasChildren) {
+                            const icon = node.expanded ? 
+                                `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" fill="currentColor" viewBox="0 0 16 16"><path d="M4 8a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 0 1h-7A.5.5 0 0 1 4 8z"/></svg>` : 
+                                `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" fill="currentColor" viewBox="0 0 16 16"><path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z"/></svg>`;
+                            toggleButton = `<div class="toggle-btn" onclick="event.stopPropagation(); toggleExpand('${node.id}')">${icon}</div>`;
+                        }
+
+                        // Status Dot Color
+                        const statusClass = getStatusColorClass(node.status);
+                        
+                        // Icon indicators
+                        const imageIcon = node.image ? `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" class="text-white/90" viewBox="0 0 16 16"><path d="M6.002 5.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/><path d="M2.002 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2h-12zm12 1a1 1 0 0 1 1 1v6.5l-3.777-1.947a.5.5 0 0 0-.577.093l-3.71 3.71-2.66-1.772a.5.5 0 0 0-.63.062L1.002 12V3a1 1 0 0 1 1-1h12z"/></svg>` : '';
+
+                        // FLEX LAYOUT FÖR ATT FÖRHINDRA OVERFLOW
+                        html += `
+                            <li class="relative node-container ${index < children.length - 1 ? 'node-line' : ''}">
+                                <div class="node-line-horizontal"></div>
+                                ${toggleButton}
+                                <div id="node-${node.id}" 
+                                     data-id="${node.id}" 
+                                     class="node-card inline-block p-3 pl-4 text-white ${colorClass} max-w-full w-full sm:w-auto"
+                                     style="min-width: 260px;"
+                                     draggable="true">
+                                    
+                                    <div class="flex justify-between items-start gap-2">
+                                        <!-- Left Side: Name & Type -->
+                                        <div class="flex flex-col min-w-0 overflow-hidden">
+                                            <div class="font-semibold text-lg truncate pr-1" title="${node.actualName}">${node.actualName}</div>
+                                            <div class="flex items-center gap-2 mt-1">
+                                                <span class="text-xs font-medium bg-white/20 px-2 py-0.5 rounded-full whitespace-nowrap border border-white/10">${node.filetype}</span>
+                                                <span class="text-[10px] opacity-70">#${node.simpleId}</span>
+                                            </div>
+                                        </div>
+
+                                        <!-- Right Side: Status & Badge -->
+                                        <div class="flex flex-col items-end gap-1 flex-shrink-0">
+                                            <div class="flex items-center gap-1.5">
+                                                ${imageIcon}
+                                                <div class="w-3 h-3 rounded-full border border-white/50 ${statusClass}" title="${getStatusLabel(node.status)}"></div>
+                                            </div>
+                                            <div class="bg-black/20 rounded px-1.5 py-0.5 text-[10px] font-semibold text-white uppercase tracking-wide backdrop-blur-sm whitespace-nowrap">
+                                                ${node.responsible}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div id="details-${node.id}" class="text-xs mt-2 space-y-1 hidden pointer-events-none border-t border-white/10 pt-2">
+                                        <p>Antal: ${node.count}</p>
+                                        <div class="flex justify-between mt-1 opacity-80">
+                                            <span class="truncate mr-2">${node.nickname}</span>
+                                        </div>
+                                        ${node.notes ? `<p class="mt-1 opacity-90 truncate">📝 ${node.notes}</p>` : ''}
+                                    </div>
+                                </div>
+                                ${node.expanded ? renderChildren(node.id) : ''}
+                            </li>
+                        `;
+                    }
+                });
+                html += '</ul>';
+                return html;
+            }
+
+            treeContainer.innerHTML = renderChildren(null); 
+            
+            // Attaching listeners here is fine since we cleared innerHTML
+            document.querySelectorAll('.node-card').forEach(card => {
+                card.addEventListener('click', handleNodeClick);
+                card.addEventListener('dragstart', handleDragStart);
+                card.addEventListener('dragend', handleDragEnd);
+                card.addEventListener('dragover', handleDragOver);
+                card.addEventListener('dragleave', handleDragLeave);
+                card.addEventListener('drop', handleDrop);
+            });
+            if(document.getElementById('responsible-filter').options.length <= 1) {
+                renderResponsibleFilterOptions();
+            }
+        }
+
+        function renderResponsibleFilterOptions() {
+            const select = document.getElementById('responsible-filter');
+            const currentVal = select.value;
+            select.innerHTML = '<option value="ALL">Visa alla</option>';
+            const usedInTree = new Set(data.map(n => n.responsible));
+            const allOptions = new Set([...responsibleNames, ...usedInTree]);
+            const sortedOptions = Array.from(allOptions).sort();
+            sortedOptions.forEach(r => {
+                const option = document.createElement('option');
+                option.value = r;
+                option.textContent = r;
+                if (r === currentVal) option.selected = true;
+                select.appendChild(option);
+            });
+        }
+
+        // --- Event Handlers ---
+        function handleNodeClick(event) {
+            // Prevent if dragging class is present
+            if (event.currentTarget.classList.contains('dragging')) return;
+
+            const nodeId = event.currentTarget.dataset.id;
+            if (selectedNodeId === nodeId) { 
+                // If already selected, open Edit. Hide info box first to avoid overlap/state confusion
+                hideInfoBox(); 
+                showEditModal(nodeId); 
+            } else { 
+                // Select and show info
+                showInfoBoxForNode(nodeId);
+            }
+        }
+
+        function updateInfoBox(nodeId) {
+            const node = getNode(nodeId);
+            if (!node) { setInfoBoxVisibility(false); return; }
+
+            // Image handling
+            const imgDisplay = document.getElementById('info-image-display');
+            const placeholder = document.getElementById('no-image-placeholder');
+            const container = document.getElementById('info-image-container');
+            const actions = document.getElementById('image-actions');
+
+            if (node.image) {
+                imgDisplay.src = node.image;
+                imgDisplay.classList.remove('hidden');
+                placeholder.classList.add('hidden');
+                container.classList.add('has-image');
+                actions.classList.remove('hidden');
+            } else {
+                imgDisplay.src = '';
+                imgDisplay.classList.add('hidden');
+                placeholder.classList.remove('hidden');
+                container.classList.remove('has-image');
+                actions.classList.add('hidden');
+            }
+
+            document.getElementById('info-box-title').textContent = node.actualName;
+            document.getElementById('info-box-nickname').textContent = node.nickname; 
+            document.getElementById('info-filetype').textContent = node.filetype;
+            document.getElementById('info-count').textContent = node.count;
+            document.getElementById('info-responsible').textContent = node.responsible;
+            document.getElementById('info-filename').textContent = node.filename;
+            document.getElementById('info-box-id').textContent = `UUID: ${node.id.substring(0,8)}...`;
+            document.getElementById('info-box-simpleid').textContent = `#${node.simpleId}`;
+            
+            // Update Status Pill
+            const statusPill = document.getElementById('info-box-status-pill');
+            statusPill.className = `text-xs font-semibold text-white px-2 py-1 rounded uppercase tracking-wide ${getStatusColorClass(node.status)}`;
+            statusPill.textContent = getStatusLabel(node.status);
+
+            const notesContainer = document.getElementById('info-notes-container');
+            const notesText = document.getElementById('info-notes');
+            
+            if (node.notes && node.notes.trim() !== '') { notesText.textContent = node.notes; notesContainer.classList.remove('hidden'); } 
+            else { notesContainer.classList.add('hidden'); }
+
+            setInfoBoxVisibility(true);
+        }
+
+        function showEditModal(nodeId) {
+            const node = getNode(nodeId);
+            if (!node) return;
+            
+            hideInfoBox();
+
+            document.getElementById('modal-title').textContent = `Redigera: ${node.actualName}`;
+            document.getElementById('modal-id').value = node.id;
+            document.getElementById('modal-nickname').value = node.nickname;
+            document.getElementById('modal-actualName').value = node.actualName; 
+            document.getElementById('modal-display-simpleid').textContent = node.simpleId;
+            
+            // Set Status
+            document.getElementById('modal-status').value = node.status || 'not_started';
+
+            const notesArea = document.getElementById('modal-notes');
+            notesArea.value = node.notes || '';
+            populateResponsibleDropdown('modal-responsible', node.responsible);
+            document.getElementById('modal-filetype').value = node.filetype;
+            document.getElementById('modal-count').value = node.count;
+            document.getElementById('modal-filetype').disabled = node.parentId === null;
+            document.getElementById('edit-modal').classList.remove('hidden');
+            requestAnimationFrame(() => autoResizeTextarea(notesArea));
+        }
+
+        function closeEditModal() { 
+            document.getElementById('edit-modal').classList.add('hidden');
+            if (selectedNodeId) showInfoBoxForNode(selectedNodeId);
+        }
+
+        function showAddModal(parentId) {
+            const parent = getNode(parentId);
+            if (!parent) return;
+            
+            hideInfoBox();
+            
+            document.getElementById('add-parent-id').value = parent.id;
+            document.getElementById('add-parent-name').textContent = parent.actualName;
+            document.getElementById('add-modal').classList.remove('hidden');
+            const suggestedResp = responsibleNames.includes(parent.responsible) ? parent.responsible : '?';
+            populateResponsibleDropdown('add-responsible', suggestedResp);
+            document.getElementById('add-nickname').value = '';
+            document.getElementById('add-actualName').value = '';
+            document.getElementById('add-count').value = 1;
+            document.getElementById('add-notes').value = '';
+            document.getElementById('add-status').value = 'not_started';
+        }
+
+        function closeAddModal() { 
+            document.getElementById('add-modal').classList.add('hidden'); 
+            if (selectedNodeId) showInfoBoxForNode(selectedNodeId);
+        }
+
+        document.getElementById('modal-notes').addEventListener('input', function() { autoResizeTextarea(this); });
+        document.getElementById('add-notes').addEventListener('input', function() { autoResizeTextarea(this); });
+
+        function handleEditSubmit(event) {
+            event.preventDefault();
+            const nodeId = document.getElementById('modal-id').value;
+            const node = getNode(nodeId);
+            if (!node) return;
+
+            const oldActualName = node.actualName;
+            const newStatus = document.getElementById('modal-status').value;
+
+            // Parent Completion Check
+            if (newStatus === 'done' && node.children && node.children.length > 0) {
+                const unfinishedChildren = [];
+                node.children.forEach(childId => {
+                    const child = getNode(childId);
+                    if (child && child.status !== 'done') {
+                        unfinishedChildren.push(child.actualName);
+                    }
+                });
+
+                if (unfinishedChildren.length > 0) {
+                    showCustomAlert(
+                        "Inte så fort!",
+                        `Haha, tro inte att du är klar med denna ännu, dessa är ju kvar:<br><br>• ${unfinishedChildren.join('<br>• ')}`
+                    );
+                    return;
+                }
+            }
+
+            node.nickname = document.getElementById('modal-nickname').value;
+            node.actualName = document.getElementById('modal-actualName').value; 
+            node.responsible = document.getElementById('modal-responsible').value;
+            node.count = parseInt(document.getElementById('modal-count').value, 10);
+            node.notes = document.getElementById('modal-notes').value;
+            node.status = newStatus;
+
+            if (node.parentId !== null) {
+                const oldFiletype = node.filetype;
+                node.filetype = document.getElementById('modal-filetype').value;
+                if (oldFiletype === 'Assembly' && node.filetype === 'Part' && node.children.length > 0) { deleteChildrenRecursively(nodeId); }
+            }
+            if (oldActualName !== node.actualName || node.filetype === 'Assembly') { regenerateFilenames(); }
+            saveData(); 
+            document.getElementById('edit-modal').classList.add('hidden'); 
+            showInfoBoxForNode(nodeId); 
+            renderTree(document.getElementById('responsible-filter').value); renderResponsibleFilterOptions(); 
+        }
+
+        function handleAddSubmit(event) {
+            event.preventDefault();
+            const parentId = document.getElementById('add-parent-id').value;
+            const parentNode = getNode(parentId);
+            if (!parentNode) return;
+            const newId = generateNextId();
+            const newNode = {
+                id: crypto.randomUUID(),
+                parentId: parentId,
+                nickname: document.getElementById('add-nickname').value,
+                actualName: document.getElementById('add-actualName').value,
+                filetype: document.getElementById('add-filetype').value,
+                count: parseInt(document.getElementById('add-count').value, 10),
+                responsible: document.getElementById('add-responsible').value,
+                notes: document.getElementById('add-notes').value,
+                status: document.getElementById('add-status').value,
+                simpleId: newId,
+                expanded: true, 
+                children: [],
+                image: null
+            };
+            data.push(newNode);
+            parentNode.children.push(newNode.id);
+            regenerateFilenames(); 
+            saveData(); 
+            document.getElementById('add-modal').classList.add('hidden');
+            showInfoBoxForNode(parentId); 
+            renderTree(document.getElementById('responsible-filter').value); renderResponsibleFilterOptions();
+        }
+
+        // --- Drag & Drop / Delete ---
+        function openDeleteModal(nodeId) {
+            const node = getNode(nodeId); if (!node) return;
+            hideInfoBox();
+            document.getElementById('delete-node-name').textContent = node.actualName;
+            document.getElementById('delete-node-id').value = nodeId;
+            document.getElementById('delete-modal').classList.remove('hidden');
+        }
+        function closeDeleteModal() { 
+            document.getElementById('delete-modal').classList.add('hidden');
+            if (selectedNodeId) showInfoBoxForNode(selectedNodeId);
+        }
+        function performDelete() {
+            const nodeId = document.getElementById('delete-node-id').value; if (!nodeId) return;
+            const node = getNode(nodeId); if (!node) { closeDeleteModal(); return; }
+            const idsToDelete = [nodeId, ...findDescendants(nodeId)];
+            data = data.filter(n => !idsToDelete.includes(n.id));
+            if (node.parentId) { const parent = getNode(node.parentId); if (parent) parent.children = parent.children.filter(id => id !== nodeId); }
+            saveData(); 
+            document.getElementById('delete-modal').classList.add('hidden');
+            selectedNodeId = null; 
+            renderTree(document.getElementById('responsible-filter').value);
+        }
+        function findDescendants(currentId) {
+            const idsToDelete = []; const children = data.filter(n => n.parentId === currentId);
+            children.forEach(child => { idsToDelete.push(child.id); idsToDelete.push(...findDescendants(child.id)); });
+            return idsToDelete;
+        }
+        function deleteChildrenRecursively(parentId) {
+            const idsToDelete = findDescendants(parentId);
+            data = data.filter(n => !idsToDelete.includes(n.id));
+            const parent = getNode(parentId); if (parent) parent.children = [];
+        }
+        function moveNode(draggedId, targetId) {
+            if (draggedId === targetId) return; 
+            const draggedNode = getNode(draggedId); const targetNode = getNode(targetId);
+            if (!draggedNode || !targetNode) return;
+            if (draggedNode.parentId === null) { showCustomAlert("Fel", "Du kan inte flytta rotnoden."); return; }
+            if (targetNode.filetype === 'Part') { showCustomAlert("Fel", "Du kan inte lägga en nod inuti en Part."); return; }
+            if (isDescendant(draggedId, targetId)) { showCustomAlert("Fel", "Du kan inte flytta en nod inuti sig själv eller sina underordnade."); return; }
+            const oldParent = getNode(draggedNode.parentId); if (oldParent) oldParent.children = oldParent.children.filter(id => id !== draggedId);
+            draggedNode.parentId = targetId;
+            if (!targetNode.children) targetNode.children = []; targetNode.children.push(draggedId);
+            regenerateFilenames(); saveData(); renderTree(document.getElementById('responsible-filter').value);
+        }
+        function isDescendant(ancestorId, targetId) {
+            if (ancestorId === targetId) return true;
+            const children = data.filter(n => n.parentId === ancestorId);
+            for (const child of children) { if (isDescendant(child.id, targetId)) return true; }
+            return false;
+        }
+        function handleDragStart(e) { e.stopPropagation(); e.dataTransfer.setData('text/plain', e.target.dataset.id); e.target.classList.add('dragging'); }
+        function handleDragEnd(e) { e.target.classList.remove('dragging'); document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over', 'target-part')); }
+        function handleDragOver(e) { e.preventDefault(); e.stopPropagation(); const card = e.currentTarget; if (card.classList.contains('dragging')) return; card.classList.add('drag-over'); const targetId = card.dataset.id; const targetNode = getNode(targetId); if (targetNode && targetNode.filetype === 'Part') { card.classList.add('target-part'); } }
+        function handleDragLeave(e) { e.currentTarget.classList.remove('drag-over', 'target-part'); }
+        function handleDrop(e) { e.preventDefault(); e.stopPropagation(); const draggedId = e.dataTransfer.getData('text/plain'); const targetId = e.currentTarget.dataset.id; e.currentTarget.classList.remove('drag-over', 'target-part'); moveNode(draggedId, targetId); }
+
+        // --- CSV & Excel & ZIP Export/Import ---
+        document.getElementById('import-file-input').addEventListener('change', function(e) { 
+            const file = e.target.files[0]; 
+            if (!file) return; 
+            
+            toggleLoading(true, "Importerar data...");
+
+            if (file.name.endsWith('.zip')) {
+                if (typeof JSZip === 'undefined') {
+                    showCustomAlert("Fel", "Kunde inte ladda ZIP-biblioteket. Kontrollera din internetanslutning.");
+                    toggleLoading(false);
+                    return;
+                }
+                importFromZip(file).finally(() => toggleLoading(false));
+            } else {
+                const reader = new FileReader(); 
+                reader.onload = function(e) { 
+                    try {
+                        parseAndLoadCSV(e.target.result); 
+                    } catch(err) {
+                        showCustomAlert("Fel", "Kunde inte läsa CSV: " + err.message);
+                    } finally {
+                        toggleLoading(false);
+                    }
+                }; 
+                reader.onerror = function() {
+                    toggleLoading(false);
+                    showCustomAlert("Fel", "Kunde inte läsa filen.");
+                }
+                reader.readAsText(file); 
+            }
+            e.target.value = ''; 
+        });
+
+        // IMPORT ZIP
+        async function importFromZip(file) {
+            try {
+                const zip = await JSZip.loadAsync(file);
+                
+                // Read Data JSON
+                const dataFile = zip.file("structure_data.json");
+                if(!dataFile) throw new Error("Ogiltig ZIP: structure_data.json saknas.");
+                
+                const dataText = await dataFile.async("text");
+                const jsonData = JSON.parse(dataText);
+
+                // Load images from zip folder
+                const imageFolder = zip.folder("images");
+                const nodes = jsonData.data;
+
+                // Create a map for images
+                const imageMap = {};
+                if (imageFolder) {
+                    // Vi itererar genom bildmappen
+                    const promises = [];
+                    imageFolder.forEach((relativePath, file) => {
+                        // relativePath is e.g. "uuid.jpg"
+                        promises.push(
+                            file.async("base64").then(base64 => {
+                                const dataUri = "data:image/jpeg;base64," + base64;
+                                const id = relativePath.split('.')[0];
+                                imageMap[id] = dataUri;
+                            })
+                        );
+                    });
+                    await Promise.all(promises);
+                }
+
+                // Restore data and reattach images
+                data = nodes;
+                responsibleNames = jsonData.responsibles || responsibleNames;
+                
+                data.forEach(node => {
+                    if (imageMap[node.id]) {
+                        node.image = imageMap[node.id];
+                    } else {
+                        node.image = null;
+                    }
+                });
+
+                regenerateFilenames();
+                saveData();
+                renderTree();
+                renderResponsibleFilterOptions();
+                showCustomAlert("Import klar", `Återställde ${nodes.length} delar och bilder från ZIP.`);
+
+            } catch(err) {
+                console.error(err);
+                showCustomAlert("Fel vid import", "Kunde inte läsa ZIP-filen. " + err.message);
+            }
+        }
+
+        // EXPORT ZIP
+        async function exportToZip() {
+            if (typeof JSZip === 'undefined') {
+                showCustomAlert("Fel", "Kunde inte ladda ZIP-biblioteket. Kontrollera din internetanslutning.");
+                return;
+            }
+
+            toggleLoading(true, "Skapar ZIP-arkiv...");
+            try {
+                const zip = new JSZip();
+                
+                // Create Clean Data Copy (remove base64 images from JSON to save space in the text file)
+                const cleanData = data.map(node => {
+                    const { image, ...rest } = node;
+                    return rest; 
+                });
+
+                // Save JSON structure
+                const exportObj = {
+                    version: "2.0",
+                    responsibles: responsibleNames,
+                    data: cleanData
+                };
+                zip.file("structure_data.json", JSON.stringify(exportObj, null, 2));
+
+                // Save Images folder
+                const imgFolder = zip.folder("images");
+                let imgCount = 0;
+
+                data.forEach(node => {
+                    if(node.image) {
+                        // node.image is "data:image/jpeg;base64,....."
+                        try {
+                            const base64Data = node.image.split(',')[1];
+                            imgFolder.file(`${node.id}.jpg`, base64Data, {base64: true});
+                            imgCount++;
+                        } catch(e) { console.warn("Could not save image for node", node.id); }
+                    }
+                });
+
+                // Generate ZIP
+                const content = await zip.generateAsync({type:"blob"});
+                const url = URL.createObjectURL(content);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = "Sticksag_Backup.zip";
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            } catch(e) {
+                showCustomAlert("Export Fel", "Kunde inte skapa ZIP-fil: " + e.message);
+            } finally {
+                toggleLoading(false);
+            }
+        }
+
+        function parseAndLoadCSV(csvText) {
+            try {
+                const lines = csvText.trim().split('\n'); if (lines.length < 2) throw new Error("Filen verkar tom eller saknar data.");
+                const parseLine = (line) => { const result = []; let start = 0; let inQuotes = false; for (let i = 0; i < line.length; i++) { if (line[i] === '"') { inQuotes = !inQuotes; } else if (line[i] === ',' && !inQuotes) { let field = line.substring(start, i).trim(); if (field.startsWith('"') && field.endsWith('"')) field = field.substring(1, field.length - 1).replace(/""/g, '"'); result.push(field); start = i + 1; } } let lastField = line.substring(start).trim(); if (lastField.startsWith('"') && lastField.endsWith('"')) lastField = lastField.substring(1, lastField.length - 1).replace(/""/g, '"'); result.push(lastField); return result; };
+                const headers = parseLine(lines[0]);
+                const idxResp = headers.findIndex(h => h.toLowerCase().includes('ansvarig')); const idxCount = headers.findIndex(h => h.toLowerCase().includes('antal')); const idxNick = headers.findIndex(h => h.toLowerCase().includes('nickname')); const idxActual = headers.findIndex(h => h.toLowerCase().includes('faktiskt namn')); const idxType = headers.findIndex(h => h.toLowerCase().includes('filtyp')); const idxParentNick = headers.findIndex(h => h.toLowerCase().includes('ingår i')); const idxId = headers.findIndex(h => h.toLowerCase() === 'id'); const idxNotes = headers.findIndex(h => h.toLowerCase().includes('anteckningar'));
+                if (idxNick === -1 || idxType === -1) { showCustomAlert("Felaktigt format", "CSV-filen måste innehålla kolumnerna 'Nickname' och 'Filtyp'."); return; }
+                const newNodes = []; const importedResponsibles = new Set(); let currentMaxId = 1000;
+                if(idxId !== -1) { for(let i=1; i<lines.length; i++) { const c = parseLine(lines[i]); if(c.length > idxId) { const val = parseInt(c[idxId]); if(!isNaN(val) && val > currentMaxId) currentMaxId = val; } } }
+                for (let i = 1; i < lines.length; i++) {
+                    const cols = parseLine(lines[i]); if (cols.length < headers.length) continue;
+                    const nickname = cols[idxNick]; const filetype = cols[idxType]; const responsibleRaw = idxResp !== -1 ? (cols[idxResp] || '?') : '?';
+                    if (filetype === 'METADATA' || nickname === 'SYSTEM_CONFIG_RESPONSIBLES') { const savedNames = responsibleRaw.split(';').map(s => s.trim()).filter(Boolean); savedNames.forEach(n => importedResponsibles.add(n)); continue; }
+                    const count = idxCount !== -1 ? parseInt(cols[idxCount]) || 1 : 1; const actualName = idxActual !== -1 ? (cols[idxActual] || nickname) : nickname; const parentNickRef = idxParentNick !== -1 ? cols[idxParentNick] : ''; const notes = idxNotes !== -1 ? (cols[idxNotes] || '') : '';
+                    let simpleId; if (idxId !== -1 && cols[idxId]) simpleId = cols[idxId]; else { currentMaxId++; simpleId = String(currentMaxId); }
+                    if (responsibleRaw && responsibleRaw !== '?') importedResponsibles.add(responsibleRaw);
+                    newNodes.push({ id: crypto.randomUUID(), parentId: null, nickname, actualName, filetype, count, responsible: responsibleRaw, simpleId, notes, expanded: true, children: [], image: null, _parentNickRef: parentNickRef });
+                }
+                let rootFound = false;
+                newNodes.forEach(node => { if (!node._parentNickRef) { if (rootFound) console.warn(`Flera rötter. '${node.nickname}' saknar förälder.`); rootFound = true; } else { const parent = newNodes.find(n => n.nickname === node._parentNickRef); if (parent) { node.parentId = parent.id; parent.children.push(node.id); } } delete node._parentNickRef; });
+                if (newNodes.length === 0) { showCustomAlert("Tom fil", "Inga rader hittades."); return; }
+                importedResponsibles.forEach(r => { if (!responsibleNames.includes(r)) responsibleNames.push(r); });
+                data = newNodes; regenerateFilenames(); saveData(); renderTree(); renderResponsibleFilterOptions();
+                showCustomAlert("Import klar", `${newNodes.length} delar inlästa.`);
+            } catch (err) { showCustomAlert("Fel", err.message); }
+        }
+        function getSortedData() {
+            const sortedData = []; const root = data.find(n => n.parentId === null);
+            function sortRec(pid) { const children = data.filter(n => n.parentId === pid).sort((a,b) => a.actualName.localeCompare(b.actualName)); children.forEach(c => { sortedData.push(c); sortRec(c.id); }); }
+            if(root) { sortedData.push(root); sortRec(root.id); } return sortedData;
+        }
+        function exportToCSV() {
+            const headers = ['ID', 'Ansvarig', 'Antal', 'Nickname', 'Filtyp', 'Faktiskt Namn', 'Fil-namn', 'Ingår i (assembly)', 'Anteckningar']; const sortedData = getSortedData();
+            const csvRows = sortedData.map(node => { const parent = node.parentId ? getNode(node.parentId) : null; const pName = parent ? parent.nickname : ''; return [node.simpleId, node.responsible, node.count, node.nickname, node.filetype, node.actualName, node.filename, pName, node.notes].map(v => `"${String(v).replace(/"/g, '""')}"`).join(','); });
+            const metaRow = ['', responsibleNames.join(';'), '0', 'SYSTEM_CONFIG_RESPONSIBLES', 'METADATA', '', '', '', ''].map(v => `"${String(v).replace(/"/g, '""')}"`).join(',');
+            const csvContent = headers.join(',') + '\n' + csvRows.join('\n') + '\n' + metaRow;
+            const blob = new Blob(["\ufeff", csvContent], { type: 'text/csv;charset=utf-8;' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'Sticksag_Struktur.csv'; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        }
+        function exportToExcel() {
+            const sortedData = getSortedData();
+            let table = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Sticksåg Struktur</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--><meta charset="UTF-8"></head><body><table border="1"><thead><tr style="background-color: #f0f0f0; font-weight: bold;"><td>ID</td><td>Ansvarig</td><td>Antal</td><td>Nickname</td><td>Filtyp</td><td>Faktiskt Namn</td><td>Fil-namn</td><td>Ingår i</td><td>Anteckningar</td></tr></thead><tbody>`;
+            sortedData.forEach(node => { const parent = node.parentId ? getNode(node.parentId) : null; const pName = parent ? parent.nickname : ''; table += `<tr><td>${node.simpleId}</td><td>${node.responsible}</td><td>${node.count}</td><td>${node.nickname}</td><td>${node.filetype}</td><td>${node.actualName}</td><td>${node.filename}</td><td>${pName}</td><td>${node.notes || ''}</td></tr>`; });
+            table += `<tr style="color: #999; font-style: italic;"><td></td><td>${responsibleNames.join(';')}</td><td>0</td><td>SYSTEM_CONFIG_RESPONSIBLES</td><td>METADATA</td><td></td><td></td><td></td><td></td></tr></tbody></table></body></html>`;
+            const blob = new Blob([table], { type: 'application/vnd.ms-excel' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'Sticksag_Struktur.xls'; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        }
+
+        function populateResponsibleDropdown(elementId, selectedValue = '?') {
+            const select = document.getElementById(elementId);
+            select.innerHTML = '';
+            responsibleNames.forEach(name => {
+                const option = document.createElement('option');
+                option.value = name;
+                option.textContent = name;
+                if (name === selectedValue) option.selected = true;
+                select.appendChild(option);
+            });
+            if (selectedValue && !responsibleNames.includes(selectedValue)) {
+                const option = document.createElement('option');
+                option.value = selectedValue;
+                option.textContent = `${selectedValue} (Arkiverad)`;
+                option.selected = true;
+                select.appendChild(option);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadData();
+            renderTree();
+            document.getElementById('edit-btn').addEventListener('click', () => { 
+                if (selectedNodeId) showEditModal(selectedNodeId); 
+            });
+            document.getElementById('add-part-btn').addEventListener('click', () => { 
+                if (selectedNodeId) { 
+                    const node = getNode(selectedNodeId);
+                    if(node && node.filetype === 'Part') {
+                        showCustomAlert(
+                            'Kan ej lägga till del',
+                            'Du kan inte lägga till något under en "Part".<br><br>En "Part" är en slutkomponent. Ändra den till "Assembly" om den ska innehålla delar, eller lägg till din nya del under en annan "Assembly".'
+                        );
+                        return;
+                    }
+                    const idToEdit = selectedNodeId; 
+                    setInfoBoxVisibility(false); 
+                    showAddModal(idToEdit); 
+                } 
+            });
+            document.getElementById('delete-btn').addEventListener('click', () => selectedNodeId && openDeleteModal(selectedNodeId));
+            document.getElementById('confirm-delete-btn').addEventListener('click', performDelete);
+            document.getElementById('cancel-delete-btn').addEventListener('click', closeDeleteModal);
+            document.getElementById('close-modal-btn').addEventListener('click', closeEditModal);
+            document.getElementById('edit-form').addEventListener('submit', handleEditSubmit);
+            document.getElementById('close-add-modal-btn').addEventListener('click', closeAddModal);
+            document.getElementById('add-form').addEventListener('submit', handleAddSubmit);
+            document.getElementById('responsible-filter').addEventListener('change', (e) => { renderTree(e.target.value); hideInfoBox(); });
+            document.getElementById('export-csv').addEventListener('click', exportToCSV);
+            document.getElementById('export-excel').addEventListener('click', exportToExcel);
+            document.getElementById('export-zip').addEventListener('click', exportToZip);
+        });
+    </script>
 </body>
 </html>
